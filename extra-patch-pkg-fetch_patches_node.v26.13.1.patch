@@ -1,6 +1,6 @@
 new file mode 100644
 --- /dev/null
-+++ yao-pkg/node_modules/@yao-pkg/pkg-fetch/patches/node.v26.13.0.cpp.patch
++++ yao-pkg/node_modules/@yao-pkg/pkg-fetch/patches/node.v26.13.1.cpp.patch
 @@ -0,0 +1,1078 @@
 +diff --git node/deps/v8/include/v8-initialization.h node/deps/v8/include/v8-initialization.h
 +index 406f1d0ba5..fb8eea420d 100644
@@ -1124,7 +1124,7 @@ new file mode 100644
 +  "v8.17.0": [
 +    "node.v8.17.0.cpp.patch"
 +  ],
-+  "v26.13.0": [
-+    "node.v26.13.0.cpp.patch"
++  "v26.13.1": [
++    "node.v26.13.1.cpp.patch"
 +  ]
  }
