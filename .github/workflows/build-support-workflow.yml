@@ -425,6 +425,79 @@ jobs:
           git -C src/document-server-package describe --tags
 
       # ================================================================
+      # CHECK OUT MARKETPLACE / SDKJS PLUGIN ASSETS
+      # ================================================================
+
+      # onlyoffice.github.io has an independent tagging scheme. Do not
+      # correlate its tags with DS_TAG: use the default branch's HEAD at
+      # workflow-run time and record the exact commit in the asset.
+      # Sparse checkout limits the working tree to the complete Marketplace
+      # plugin package and the three legacy v1 support files used by the port.
+      - name: Checkout Marketplace and SDKJS plugin assets
+        id: sdkjs_plugins
+        run: |
+          set -e
+
+          REPO_DIR="${GITHUB_WORKSPACE}/onlyoffice.github.io-src"
+
+          git clone \
+            --filter=blob:none \
+            --depth 1 \
+            --no-checkout \
+            https://github.com/ONLYOFFICE/onlyoffice.github.io.git \
+            "${REPO_DIR}"
+
+          git -C "${REPO_DIR}" sparse-checkout init --no-cone
+          git -C "${REPO_DIR}" sparse-checkout set --no-cone \
+            '/store/plugin/' \
+            '/sdkjs-plugins/v1/plugins.js' \
+            '/sdkjs-plugins/v1/plugins-ui.js' \
+            '/sdkjs-plugins/v1/plugins.css'
+
+          git -C "${REPO_DIR}" checkout --detach HEAD
+
+          PLUGINS_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD)"
+          PLUGINS_BRANCH="$(git -C "${REPO_DIR}" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+          PLUGINS_COMMIT_DATE="$(git -C "${REPO_DIR}" log -1 --format=%cI HEAD)"
+          PLUGINS_COMMIT_SUBJECT="$(git -C "${REPO_DIR}" log -1 --format=%s HEAD)"
+
+          if [ -z "${PLUGINS_SHA}" ]; then
+            echo "ERROR: Could not determine onlyoffice.github.io HEAD SHA."
+            exit 1
+          fi
+
+          for required in \
+            store/plugin/index.html \
+            store/plugin/scripts/code.js \
+            sdkjs-plugins/v1/plugins.js \
+            sdkjs-plugins/v1/plugins-ui.js \
+            sdkjs-plugins/v1/plugins.css
+          do
+            if [ ! -f "${REPO_DIR}/${required}" ]; then
+              echo "ERROR: Required Marketplace asset is missing: ${required}"
+              exit 1
+            fi
+          done
+
+          {
+            echo "PLUGINS_SHA=${PLUGINS_SHA}"
+            echo "PLUGINS_BRANCH=${PLUGINS_BRANCH}"
+            echo "PLUGINS_COMMIT_DATE=${PLUGINS_COMMIT_DATE}"
+            echo "PLUGINS_COMMIT_SUBJECT=${PLUGINS_COMMIT_SUBJECT}"
+          } >> "${GITHUB_ENV}"
+
+          {
+            echo "Marketplace source: https://github.com/ONLYOFFICE/onlyoffice.github.io"
+            echo "Default branch:     ${PLUGINS_BRANCH:-unknown}"
+            echo "Commit:             ${PLUGINS_SHA}"
+            echo "Commit date:        ${PLUGINS_COMMIT_DATE}"
+            echo "Commit subject:     ${PLUGINS_COMMIT_SUBJECT}"
+          }
+
+          echo "Marketplace source HEAD: ${PLUGINS_SHA}"
+          echo "Marketplace default branch: ${PLUGINS_BRANCH:-unknown}"
+
+      # ================================================================
       # CREATE SOURCE PACKAGE PATCHES
       # ================================================================
 
@@ -2245,9 +2318,13 @@ jobs:
           TAG="${DS_TAG}"
           DATE="$(date +%Y%m%d%H%M)"
           RELEASE_TAG="${TAG}-${DATE}"
+          # Both distfiles use the same build-support release identifier.
+          # The Marketplace source commit is recorded separately as provenance.
+          SDKJS_PLUGINS_TAG="${RELEASE_TAG}"
 
-          echo "tag=${TAG}"                 >> "${GITHUB_OUTPUT}"
-          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${TAG}"                         >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${RELEASE_TAG}"         >> "${GITHUB_OUTPUT}"
+          echo "sdkjs_plugins_tag=${SDKJS_PLUGINS_TAG}" >> "${GITHUB_OUTPUT}"
 
           echo "Release tag: ${RELEASE_TAG}"
 
@@ -2332,6 +2409,80 @@ jobs:
           echo
           echo "SHA256: $(sha256sum "${TAR_NAME}" | awk '{print $1}')"
           echo "SIZE:   $(stat -c %s "${TAR_NAME}")"
+
+      # ================================================================
+      # CREATE SDKJS / MARKETPLACE PLUGIN TARBALL
+      # ================================================================
+
+      # The archive deliberately extracts to onlyoffice.github.io/ so the
+      # FreeBSD port can use the same ${WRKSRC}/onlyoffice.github.io paths
+      # as the existing GH_TUPLE checkout. It contains the entire store/plugin
+      # directory plus only the three required sdkjs-plugins/v1 files.
+      - name: Create SDKJS plugin tarball
+        run: |
+          set -e
+
+          SDKJS_PLUGINS_TAG="${{ steps.vars.outputs.sdkjs_plugins_tag }}"
+          DIR_NAME="onlyoffice-DS-sdkjs-plugins-${SDKJS_PLUGINS_TAG}"
+          TAR_NAME="${DIR_NAME}.tar.gz"
+          SRC_DIR="${GITHUB_WORKSPACE}/onlyoffice.github.io-src"
+          STAGE_DIR="${GITHUB_WORKSPACE}/sdkjs-plugin-stage"
+          ROOT_DIR="${STAGE_DIR}/onlyoffice.github.io"
+
+          rm -rf "${DIR_NAME}" "${TAR_NAME}" "${STAGE_DIR}"
+          mkdir -p \
+            "${ROOT_DIR}/store" \
+            "${ROOT_DIR}/sdkjs-plugins/v1"
+
+          cp -a "${SRC_DIR}/store/plugin" "${ROOT_DIR}/store/"
+          cp -a \
+            "${SRC_DIR}/sdkjs-plugins/v1/plugins.js" \
+            "${SRC_DIR}/sdkjs-plugins/v1/plugins-ui.js" \
+            "${SRC_DIR}/sdkjs-plugins/v1/plugins.css" \
+            "${ROOT_DIR}/sdkjs-plugins/v1/"
+
+          # Keep provenance inside the single top-level directory so that
+          # extracting the archive creates only ${WRKSRC}/onlyoffice.github.io.
+          {
+            echo "Repository:          https://github.com/ONLYOFFICE/onlyoffice.github.io"
+            echo "Default branch:      ${PLUGINS_BRANCH:-unknown}"
+            echo "Commit:              ${PLUGINS_SHA}"
+            echo "Commit date:         ${PLUGINS_COMMIT_DATE}"
+            echo "Commit subject:      ${PLUGINS_COMMIT_SUBJECT}"
+            echo "DocumentServer tag:  ${DS_TAG}"
+            echo "Build-support tag:   ${SDKJS_PLUGINS_TAG}"
+            echo "SDKJS plugin tag:    ${SDKJS_PLUGINS_TAG}"
+            echo "Built from:          ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          } > "${ROOT_DIR}/.build-info.txt"
+
+          # Fail if the staged payload differs from the intended minimal set.
+          test -d "${ROOT_DIR}/store/plugin"
+          test -f "${ROOT_DIR}/sdkjs-plugins/v1/plugins.js"
+          test -f "${ROOT_DIR}/sdkjs-plugins/v1/plugins-ui.js"
+          test -f "${ROOT_DIR}/sdkjs-plugins/v1/plugins.css"
+
+          tar \
+            --sort=name \
+            --mtime='UTC 2020-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "${TAR_NAME}" \
+            -C "${STAGE_DIR}" \
+            onlyoffice.github.io
+
+          echo "SDKJS_PLUGIN_TAR_NAME=${TAR_NAME}" >> "${GITHUB_ENV}"
+
+          echo
+          echo "Created:"
+          ls -lh "${TAR_NAME}"
+          echo
+          echo "Marketplace source commit: ${PLUGINS_SHA}"
+          echo "SHA256: $(sha256sum "${TAR_NAME}" | awk '{print $1}')"
+          echo "SIZE:   $(stat -c %s "${TAR_NAME}")"
+          echo
+          echo "Archive contents:"
+          tar -tzf "${TAR_NAME}"
 
       # ================================================================
       # COMMIT METADATA
@@ -2429,6 +2580,22 @@ jobs:
             echo "| pkg-fetch patch commit | \`${PKG_FETCH_PATCH_COMMIT}\` |"
             echo "| FreeBSD node patches | \`${FREEBSD_PATCH_COUNT}\` |"
             echo
+            echo "## SDKJS / Marketplace plugin assets"
+            echo
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Source repository | \`ONLYOFFICE/onlyoffice.github.io\` |"
+            echo "| Default branch | \`${PLUGINS_BRANCH:-unknown}\` |"
+            echo "| Source commit | \`${PLUGINS_SHA}\` |"
+            echo "| Commit date | \`${PLUGINS_COMMIT_DATE}\` |"
+            echo "| Commit subject | ${PLUGINS_COMMIT_SUBJECT} |"
+            echo
+            echo "The SDKJS plugin archive contains the complete \`store/plugin/\`"
+            echo "directory and \`sdkjs-plugins/v1/{plugins.js,plugins-ui.js,plugins.css}\`."
+            echo "It extracts under \`onlyoffice.github.io/\` and includes the source SHA"
+            echo "in \`.build-info.txt\`. The Marketplace source is selected from its"
+            echo "default-branch HEAD, independently of the DocumentServer tag."
+            echo
             echo "## Lockfiles"
             echo
             echo "This cache uses \`package-lock.json\` (lockfile-version 3)."
@@ -2450,13 +2617,16 @@ jobs:
             echo '```'
             echo "SHA256 (${TAR_NAME}) = $(sha256sum "${TAR_NAME}" | awk '{print $1}')"
             echo "SIZE (${TAR_NAME}) = $(stat -c %s "${TAR_NAME}")"
+            echo "SHA256 (${SDKJS_PLUGIN_TAR_NAME}) = $(sha256sum "${SDKJS_PLUGIN_TAR_NAME}" | awk '{print $1}')"
+            echo "SIZE (${SDKJS_PLUGIN_TAR_NAME}) = $(stat -c %s "${SDKJS_PLUGIN_TAR_NAME}")"
             echo '```'
           } > "${NOTES_FILE}"
 
           gh release create \
             "${{ steps.vars.outputs.release_tag }}" \
             "${TAR_NAME}" \
-            --title "NPM Cache ${{ steps.vars.outputs.release_tag }}" \
+            "${SDKJS_PLUGIN_TAR_NAME}" \
+            --title "Build Support ${{ steps.vars.outputs.release_tag }}" \
             --notes-file "${NOTES_FILE}"
 
       - name: Upload tarball as workflow artifact (no-release runs)
@@ -2465,4 +2635,13 @@ jobs:
         with:
           name: onlyoffice-DS-npm-cache-${{ steps.vars.outputs.release_tag }}
           path: ${{ env.TAR_NAME }}
+          retention-days: 7
+
+
+      - name: Upload SDKJS plugin tarball as workflow artifact (no-release runs)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.publish_release != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: onlyoffice-DS-sdkjs-plugins-${{ steps.vars.outputs.sdkjs_plugins_tag }}
+          path: ${{ env.SDKJS_PLUGIN_TAR_NAME }}
           retention-days: 7

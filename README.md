@@ -422,6 +422,131 @@ are also printed in the build log and included in the GitHub Release notes.
 
 ---
 
+## SDKJS Marketplace plugin assets
+
+The FreeBSD port also needs a small, separately versioned source archive from
+[ONLYOFFICE/onlyoffice.github.io](https://github.com/ONLYOFFICE/onlyoffice.github.io).
+This repository supplies the Marketplace plugin bridge and the legacy SDKJS
+plugin support files used by DocumentServer. It is **not** part of the
+DocumentServer source-tag/submodule set, and its release tags do not track
+DocumentServer releases.
+
+### Why these files are included
+
+The Marketplace integration consists of two distinct pieces:
+
+- `store/plugin/` is the Marketplace plugin package installed by DocumentServer
+  under `sdkjs-plugins/marketplace/`. It contains the outer plugin bridge,
+  including `scripts/code.js`.
+- `sdkjs-plugins/v1/` contains compatibility/support assets used by the
+  DocumentServer build. The port needs only `plugins.js`, `plugins-ui.js`, and
+  `plugins.css` from this directory.
+
+The current Marketplace bridge also addresses an initialization-order problem:
+the Marketplace store can request the installed-plugin list before the outer
+plugin bridge has finished initializing `window.Asc.plugin.executeMethod`.
+Using the updated upstream bridge ensures that the Marketplace iframe is not
+loaded until the plugin initialization path is ready (and the connectivity
+check has completed), avoiding the race observed with the older bundled code.
+
+### Deliberately limited source checkout
+
+The workflow checks out the default-branch `HEAD` of
+`ONLYOFFICE/onlyoffice.github.io` and uses sparse checkout to obtain only:
+
+```text
+store/plugin/
+sdkjs-plugins/v1/plugins.js
+sdkjs-plugins/v1/plugins-ui.js
+sdkjs-plugins/v1/plugins.css
+```
+
+It does **not** download or package the complete repository. The full upstream
+repository archive is approximately 290 MB, while the files needed by this port
+are approximately 350 KB. Fetching and retaining the entire archive would add
+hundreds of megabytes of irrelevant source to a build-support release and
+unnecessarily increase download time, storage, and distfile handling. Sparse
+checkout keeps the source acquisition and resulting distfile limited to the
+assets the port actually consumes.
+
+The workflow does not use an upstream Marketplace release tag as its source
+selector. Marketplace changes are independent of DocumentServer release
+numbers, and a Marketplace tag can lag behind fixes on the default branch.
+Instead, each build captures the default-branch commit and records its full
+40-character SHA in the archive metadata and GitHub Release notes. This gives
+the port the current upstream files while retaining an auditable record of
+exactly which source revision was used.
+
+### Release naming and provenance
+
+The Marketplace archive uses the **same build-support release identifier** as
+the npm cache archive. For example, the port Makefile can set:
+
+```makefile
+_NPM_CACHE_TAG=         10.0.0.169-202611151200
+_SDKJS_PLUGINS_TAG=     ${_NPM_CACHE_TAG}
+```
+
+`_SDKJS_PLUGINS_TAG` is therefore a build-support release identifier, **not**
+the upstream Marketplace Git SHA. The SHA is provenance metadata, kept
+separately so that the port Makefile does not need to be updated for every
+Marketplace commit.
+
+The resulting distfile is named:
+
+```text
+onlyoffice-DS-sdkjs-plugins-<build-support-release-id>.tar.gz
+```
+
+Its archive root and contents are:
+
+```text
+onlyoffice.github.io/
+├── .build-info.txt
+├── store/
+│   └── plugin/
+│       └── ...                         # complete Marketplace plugin package
+└── sdkjs-plugins/
+    └── v1/
+        ├── plugins.js
+        ├── plugins-ui.js
+        └── plugins.css
+```
+
+`.build-info.txt` records the source repository, default branch, full upstream
+commit SHA, commit date and subject, DocumentServer tag, build-support release
+identifier, SDKJS archive tag, and build-support workflow commit. The GitHub
+Release notes also identify the Marketplace source commit and summarize the
+archive contents.
+
+The npm cache and Marketplace assets are published as separate distfiles
+attached to the same build-support release. A workflow run that does not publish
+a release still makes the generated archives available as workflow artifacts.
+
+### Using the Marketplace archive in the FreeBSD port
+
+The port extracts the archive so that the source tree contains
+`${WRKSRC}/onlyoffice.github.io/`. The existing port patches then use these
+local files during the offline build:
+
+- `build/tools/scripts/deploy/server.py` copies the three `sdkjs-plugins/v1`
+  assets from the checked-out source instead of downloading them.
+- `build/tools/scripts/base.py` copies the same three compatibility assets
+  locally and disables the Marketplace git update, so the build does not try
+  to contact GitHub from the Poudriere jail.
+- The complete `store/plugin/` directory supplies the Marketplace plugin
+  package installed into DocumentServer's `sdkjs-plugins/marketplace/`
+  directory.
+
+This keeps the Poudriere build network-independent while allowing the
+Marketplace bridge to be refreshed independently of the DocumentServer
+submodule tags. When updating the workflow, keep the sparse-checkout paths
+aligned with the files consumed by the port patches; do not broaden the
+archive to the complete `onlyoffice.github.io` repository unless the port
+actually begins to require additional files.
+
+---
+
 ## Using the cache in a Poudriere build
 
 The port's Makefile installs this cache in two passes:
