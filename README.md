@@ -414,7 +414,7 @@ be reviewed.
 ### Release tarball layout
 
 ```
-onlyoffice-DS-npm-cache-<tag>-<datetime>/
+.npm/
 ├── _cacache/                                   # npm cache (content-v2 + index-v5)
 ├── package-locks/                              # 11 sub-projects, mirroring source-relative paths
 │   ├── sdkjs/
