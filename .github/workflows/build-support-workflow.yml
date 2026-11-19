@@ -100,7 +100,7 @@
 # The pkg-fetch HEAD SHA is recorded in build-info.txt so the generated cache
 # can always be traced back to the exact upstream pkg-fetch source used.
 
-name: Build npm Cache (npm12 / package-lock)
+name: Build npm and sdkjs-plugin cache
 
 on:
   workflow_dispatch:
@@ -2337,8 +2337,8 @@ jobs:
           set -e
 
           RELEASE_TAG="${{ steps.vars.outputs.release_tag }}"
-          DIR_NAME="onlyoffice-DS-npm-cache-${RELEASE_TAG}"
-          TAR_NAME="${DIR_NAME}.tar.gz"
+          DIR_NAME=".npm"
+          TAR_NAME="onlyoffice-DS-npm-cache-${RELEASE_TAG}.tar.gz"
 
           rm -rf "${DIR_NAME}"
           mkdir "${DIR_NAME}"
@@ -2380,7 +2380,7 @@ jobs:
             echo "npm:                 ${NPM_VER}"
             echo "@yao-pkg/pkg:        ${YAO_PKG_VER}"
             echo "@yao-pkg/pkg-fetch:  ${PKG_FETCH_VER}"
-            echo "Published Node:      ${PUBLISHED_NODE_VER}"
+            echo "pkg-fetch Node:      ${PUBLISHED_NODE_VER}"
             echo "pkg-fetch baseline:  ${PKG_FETCH_BASELINE}"
             echo "pkg-fetch leapfrog:  ${PKG_FETCH_LEAPFROG}"
             echo "pkg-fetch HEAD SHA:  ${PKG_FETCH_HEAD_SHA:-N/A}"

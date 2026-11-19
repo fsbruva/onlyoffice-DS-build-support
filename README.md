@@ -1,14 +1,42 @@
-# onlyoffice-DS-npm-cache
+# onlyoffice-DS-build-support
 
-Pre-built, offline npm cache tarballs for building
-[OnlyOffice DocumentServer](https://github.com/ONLYOFFICE/DocumentServer) as a
-FreeBSD port inside a [Poudriere](https://github.com/freebsd/poudriere) jail.
+Build-support artifacts and automation for packaging
+[ONLYOFFICE DocumentServer](https://github.com/ONLYOFFICE/DocumentServer) as a
+FreeBSD port in a network-isolated
+[Poudriere](https://github.com/freebsd/poudriere) environment.
 
-The jail has no outbound internet access by design. This cache supplies every npm
-tarball the build needs so that all thirteen `npm install` invocations complete
-fully offline, with minimal packument (registry metadata) fetches.
+## Overview
+
+ONLYOFFICE DocumentServer's build process depends on external resources that are
+not reliably available—or deliberately unavailable—inside an isolated Poudriere
+jail. This repository produces and versions the supporting artifacts ahead of the
+port build, allowing the build to remain offline, reproducible, and auditable,
+while keeping independently maintained upstream components aligned with the port's
+needs.
+
+Two artifacts are produced and published independently as distfiles attached to
+the same build-support release:
+
+- **[npm dependency cache](#npm-dependency-cache)** — lockfiles, a minimal npm
+  cache containing the dependency tarballs, lifecycle-script approvals, and the
+  FreeBSD-specific `@yao-pkg/pkg-fetch` patch needed for the offline npm
+  installs.
+- **[SDKJS Marketplace plugin assets](#sdkjs-marketplace-plugin-assets)** — a
+  limited archive of the Marketplace plugin bridge and SDKJS compatibility assets,
+  sourced separately from the DocumentServer release because they are maintained
+  independently upstream.
+
+Both artifacts share a build-support release identifier, but each has its own
+source selection, contents, and build process. The sections below describe each
+artifact and how the FreeBSD port consumes it.
 
 ---
+
+## npm dependency cache
+
+This artifact supports the DocumentServer npm dependency installation during the
+offline Poudriere build. For the separately versioned SDKJS Marketplace assets,
+see [SDKJS Marketplace plugin assets](#sdkjs-marketplace-plugin-assets).
 
 ## Background
 
@@ -423,6 +451,11 @@ are also printed in the build log and included in the GitHub Release notes.
 ---
 
 ## SDKJS Marketplace plugin assets
+
+This artifact supplies Marketplace and SDKJS compatibility files that are not
+included in the DocumentServer release source and are maintained independently of
+its release tags. For the offline npm dependency cache, see
+[npm dependency cache](#npm-dependency-cache).
 
 The FreeBSD port also needs a small, separately versioned source archive from
 [ONLYOFFICE/onlyoffice.github.io](https://github.com/ONLYOFFICE/onlyoffice.github.io).
